@@ -65,6 +65,10 @@ contract LOSTToken is
     // Anti-cheat verification
     mapping(bytes32 => bool) public verifiedGameplaySessions;
     
+    // Puzzle completion tracking
+    mapping(address => uint256) public playerPuzzlesCompleted;
+    mapping(address => mapping(bytes32 => bool)) public puzzleCompleted;
+    
     // Events
     event RewardMinted(
         address indexed player,
@@ -143,16 +147,24 @@ contract LOSTToken is
      * @dev Mint rewards for puzzle completion
      * @param player The player address
      * @param sessionHash The verified gameplay session hash
+     * @param puzzleId The puzzle identifier
      * @param completionTime The time taken to complete the puzzle
      */
     function mintPuzzleReward(
         address player,
         bytes32 sessionHash,
+        bytes32 puzzleId,
         uint256 completionTime
     ) external onlyRole(GAME_CONTROLLER_ROLE) nonReentrant whenNotPaused {
         require(player != address(0), "Invalid player address");
         require(verifiedGameplaySessions[sessionHash], "Unverified gameplay session");
         require(totalMinted + PUZZLE_COMPLETION_REWARD <= MAX_SUPPLY, "Max supply exceeded");
+        
+        // Track puzzle completion (avoid double rewards for same puzzle)
+        if (!puzzleCompleted[player][puzzleId]) {
+            puzzleCompleted[player][puzzleId] = true;
+            playerPuzzlesCompleted[player]++;
+        }
         
         uint256 baseReward = PUZZLE_COMPLETION_REWARD;
         uint256 skillMultiplier = playerSkillMultiplier[player];
@@ -354,15 +366,26 @@ contract LOSTToken is
         uint256 lifetimeEarnings,
         uint256 lastRewardTimestamp,
         uint256 rewardStreak,
-        uint256 skillMultiplier
+        uint256 skillMultiplier,
+        uint256 puzzlesCompleted
     ) {
         return (
             balanceOf(player),
             playerLifetimeEarnings[player],
             playerLastRewardTimestamp[player],
             playerRewardStreak[player],
-            playerSkillMultiplier[player] > 0 ? playerSkillMultiplier[player] : 10000
+            playerSkillMultiplier[player] > 0 ? playerSkillMultiplier[player] : 10000,
+            playerPuzzlesCompleted[player]
         );
+    }
+    
+    /**
+     * @dev Get puzzle completion status for a player
+     * @param player The player address
+     * @param puzzleId The puzzle identifier
+     */
+    function isPuzzleCompleted(address player, bytes32 puzzleId) external view returns (bool) {
+        return puzzleCompleted[player][puzzleId];
     }
 
     /**
