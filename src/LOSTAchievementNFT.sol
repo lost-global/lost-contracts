@@ -9,7 +9,10 @@ import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
+import "../interfaces/ILOSTAchievementNFT.sol";
+
 contract LOSTAchievementNFT is
+    ILOSTAchievementNFT,
     Initializable,
     ERC721Upgradeable,
     ERC721EnumerableUpgradeable,
@@ -25,30 +28,7 @@ contract LOSTAchievementNFT is
 
     uint256 private _tokenIdCounter;
 
-    enum AchievementType {
-        SPEEDRUN,
-        FIRST_CLEAR,
-        SKILL_TIER,
-        PUZZLE_MASTER,
-        PERFECT_RUN,
-        SECRET_FINDER,
-        TOURNAMENT_WINNER,
-        ELITE_ESCAPER
-    }
-
-    struct Achievement {
-        AchievementType achievementType;
-        uint256 timestamp;
-        uint256 completionTime;
-        uint256 score;
-        uint256 puzzlesSolved;
-        uint256 secretsFound;
-        uint256 deaths;
-        bytes32 gameplayHash;
-        string ipfsHash;
-        bool isWorldFirst;
-        uint256 globalRank;
-    }
+    // AchievementType enum and Achievement struct are defined in ILOSTAchievementNFT interface
 
     mapping(uint256 => Achievement) public achievements;
     mapping(bytes32 => bool) public verifiedGameplayHashes;
@@ -96,51 +76,73 @@ contract LOSTAchievementNFT is
     }
 
     function _initializeAchievementThresholds() private {
-        achievementThreshold[AchievementType.SPEEDRUN] = 120;
-        achievementThreshold[AchievementType.FIRST_CLEAR] = 1;
-        achievementThreshold[AchievementType.SKILL_TIER] = 80;
         achievementThreshold[AchievementType.PUZZLE_MASTER] = 10;
-        achievementThreshold[AchievementType.PERFECT_RUN] = 0;
-        achievementThreshold[AchievementType.SECRET_FINDER] = 5;
-        achievementThreshold[AchievementType.TOURNAMENT_WINNER] = 1;
-        achievementThreshold[AchievementType.ELITE_ESCAPER] = 90;
+        achievementThreshold[AchievementType.SPEED_DEMON] = 120;
+        achievementThreshold[AchievementType.FIRST_BLOOD] = 1;
+        achievementThreshold[AchievementType.COLLECTOR] = 5;
+        achievementThreshold[AchievementType.STRATEGIST] = 80;
+        achievementThreshold[AchievementType.WORLD_FIRST] = 1;
+        achievementThreshold[AchievementType.FLAWLESS_VICTORY] = 0;
     }
 
     function mintAchievement(
         address player,
         AchievementType achievementType,
-        Achievement memory gameplayData,
-        string memory ipfsHash
+        uint256 level,
+        uint256 completionTime,
+        uint256 attempts,
+        bytes32 gameplayHash,
+        string memory ipfsMetadata
     ) external onlyRole(MINTER_ROLE) nonReentrant whenNotPaused returns (uint256) {
         require(player != address(0), "Invalid player");
+        require(gameplayHash != bytes32(0), "Invalid gameplay hash");
+        require(bytes(ipfsMetadata).length > 0, "Invalid IPFS metadata");
+        
         // Auto-verify the gameplay hash if sent by authorized minter
-        if (!verifiedGameplayHashes[gameplayData.gameplayHash]) {
-            verifiedGameplayHashes[gameplayData.gameplayHash] = true;
+        if (!verifiedGameplayHashes[gameplayHash]) {
+            verifiedGameplayHashes[gameplayHash] = true;
         }
-        require(bytes(ipfsHash).length > 0, "Invalid IPFS hash");
 
         uint256 tokenId = _tokenIdCounter;
         _tokenIdCounter++;
 
         _safeMint(player, tokenId);
-        _setTokenURI(tokenId, ipfsHash);
+        _setTokenURI(tokenId, ipfsMetadata);
 
-        gameplayData.ipfsHash = ipfsHash;
-        gameplayData.timestamp = block.timestamp;
-        achievements[tokenId] = gameplayData;
-
+        // Create achievement data
+        Achievement memory achievement = Achievement({
+            tokenId: tokenId,
+            achievementType: achievementType,
+            level: level,
+            completionTime: completionTime,
+            attempts: attempts,
+            playerScore: 0,
+            playerLevel: level,
+            deaths: attempts,
+            secretsFound: 0,
+            puzzlesSolved: 0,
+            isWorldFirst: false,
+            gameplayHash: gameplayHash,
+            ipfsMetadata: ipfsMetadata,
+            mintTimestamp: block.timestamp,
+            isTransferable: false
+        });
+        
+        achievements[tokenId] = achievement;
         playerAchievements[player][achievementType].push(tokenId);
 
-        if (_checkWorldRecord(achievementType, gameplayData.completionTime)) {
+        if (_checkWorldRecord(achievementType, completionTime)) {
             worldRecordTokenId[achievementType] = tokenId;
-            worldRecordTime[achievementType] = gameplayData.completionTime;
-            emit WorldRecordSet(tokenId, player, achievementType, gameplayData.completionTime);
+            worldRecordTime[achievementType] = completionTime;
+            achievement.isWorldFirst = true;
+            achievements[tokenId].isWorldFirst = true;
+            emit WorldRecordSet(tokenId, player, achievementType, completionTime);
         }
 
-        uint256 rarity = _calculateRarity(gameplayData);
+        uint256 rarity = _calculateRarity(achievement);
         tokenRarityScore[tokenId] = rarity;
 
-        emit AchievementMinted(tokenId, player, achievementType, gameplayData.completionTime, gameplayData.gameplayHash);
+        emit AchievementMinted(tokenId, player, achievementType, completionTime, gameplayHash);
 
         return tokenId;
     }
@@ -156,13 +158,21 @@ contract LOSTAchievementNFT is
     function _calculateRarity(Achievement memory achievement) private pure returns (uint256) {
         uint256 rarity = 0;
         
+        // Speed bonus
         if (achievement.completionTime < 60) rarity += 1000;
         else if (achievement.completionTime < 120) rarity += 500;
         else if (achievement.completionTime < 180) rarity += 250;
         
+        // Perfect run bonus
         if (achievement.deaths == 0) rarity += 750;
+        
+        // Exploration bonus
         if (achievement.secretsFound >= 10) rarity += 500;
+        
+        // Puzzle mastery bonus
         if (achievement.puzzlesSolved >= 15) rarity += 500;
+        
+        // World first bonus
         if (achievement.isWorldFirst) rarity += 2000;
         
         return rarity;
@@ -203,4 +213,62 @@ contract LOSTAchievementNFT is
     function supportsInterface(bytes4 interfaceId) public view override(ERC721Upgradeable, ERC721EnumerableUpgradeable, ERC721URIStorageUpgradeable, AccessControlUpgradeable) returns (bool) {
         return super.supportsInterface(interfaceId);
     }
+    
+    
+    /**
+     * @dev Get achievement details
+     */
+    function getAchievement(uint256 tokenId) external view returns (Achievement memory) {
+        require(_ownerOf(tokenId) != address(0), "Token does not exist");
+        return achievements[tokenId];
+    }
+    
+    /**
+     * @dev Get all achievements for a player
+     */
+    function getPlayerAchievements(address player) external view returns (uint256[] memory) {
+        uint256 balance = balanceOf(player);
+        uint256[] memory tokenIds = new uint256[](balance);
+        
+        for (uint256 i = 0; i < balance; i++) {
+            tokenIds[i] = tokenOfOwnerByIndex(player, i);
+        }
+        
+        return tokenIds;
+    }
+    
+    /**
+     * @dev Set whether an achievement NFT can be transferred
+     */
+    function setTransferable(uint256 tokenId, bool transferable) external {
+        require(ownerOf(tokenId) == msg.sender || hasRole(DEFAULT_ADMIN_ROLE, msg.sender), "Not authorized");
+        achievements[tokenId].isTransferable = transferable;
+        emit TransferabilityUpdated(tokenId, transferable);
+    }
+    
+    /**
+     * @dev Update metadata for an achievement
+     */
+    function updateMetadata(uint256 tokenId, string memory newIpfsHash) external onlyRole(MINTER_ROLE) {
+        require(_ownerOf(tokenId) != address(0), "Token does not exist");
+        achievements[tokenId].ipfsMetadata = newIpfsHash;
+        _setTokenURI(tokenId, newIpfsHash);
+        emit MetadataUpdated(tokenId, newIpfsHash);
+    }
+    
+    // Override transfer to check transferability
+    function _beforeTokenTransfer(
+        address from,
+        address to,
+        uint256 tokenId,
+        uint256 batchSize
+    ) internal virtual {
+        if (from != address(0) && to != address(0)) {
+            require(achievements[tokenId].isTransferable, "Achievement is not transferable");
+        }
+    }
+    
+    // Additional events for interface compliance
+    event TransferabilityUpdated(uint256 indexed tokenId, bool transferable);
+    event MetadataUpdated(uint256 indexed tokenId, string newIpfsHash);
 }

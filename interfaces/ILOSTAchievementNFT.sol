@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
-
-interface ILOSTAchievementNFT is IERC721 {
+interface ILOSTAchievementNFT {
     enum AchievementType { 
         PUZZLE_MASTER, 
         SPEED_DEMON, 
@@ -20,6 +18,12 @@ interface ILOSTAchievementNFT is IERC721 {
         uint256 level;
         uint256 completionTime;
         uint256 attempts;
+        uint256 playerScore;
+        uint256 playerLevel;
+        uint256 deaths;
+        uint256 secretsFound;
+        uint256 puzzlesSolved;
+        bool isWorldFirst;
         bytes32 gameplayHash;
         string ipfsMetadata;
         uint256 mintTimestamp;

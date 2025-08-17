@@ -6,6 +6,7 @@ import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
+import "../interfaces/IDecentralizedLeaderboard.sol";
 
 /**
  * @title DecentralizedLeaderboard
@@ -18,6 +19,7 @@ import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol
  * - Cross-game reputation portable between titles
  */
 contract DecentralizedLeaderboard is
+    IDecentralizedLeaderboard,
     Initializable,
     AccessControlUpgradeable,
     PausableUpgradeable,
@@ -28,21 +30,8 @@ contract DecentralizedLeaderboard is
     bytes32 public constant VALIDATOR_ROLE = keccak256("VALIDATOR_ROLE");
     bytes32 public constant UPGRADER_ROLE = keccak256("UPGRADER_ROLE");
 
-    struct LeaderboardEntry {
-        address player;
-        uint256 score;
-        uint256 completionTime;
-        uint256 puzzlesSolved;
-        uint256 secretsFound;
-        uint256 deaths;
-        uint256 timestamp;
-        bytes32 gameplayHash;
-        bool verified;
-        uint256 globalRank;
-        uint256 weeklyRank;
-        uint256 monthlyRank;
-    }
-
+    // LeaderboardEntry struct is defined in IDecentralizedLeaderboard interface
+    
     struct PlayerStats {
         uint256 totalGames;
         uint256 totalScore;
@@ -71,6 +60,8 @@ contract DecentralizedLeaderboard is
     // Weekly and monthly leaderboards
     mapping(uint256 => mapping(uint256 => LeaderboardEntry)) public weeklyLeaderboard;
     mapping(uint256 => mapping(uint256 => LeaderboardEntry)) public monthlyLeaderboard;
+    mapping(address => mapping(uint256 => uint256)) public playerWeeklyRank;
+    mapping(address => mapping(uint256 => uint256)) public playerMonthlyRank;
     
     // Player statistics
     mapping(address => PlayerStats) public playerStats;
@@ -164,16 +155,14 @@ contract DecentralizedLeaderboard is
         LeaderboardEntry memory entry = LeaderboardEntry({
             player: player,
             score: score,
+            level: puzzlesSolved,
             completionTime: completionTime,
             puzzlesSolved: puzzlesSolved,
             secretsFound: secretsFound,
             deaths: deaths,
-            timestamp: block.timestamp,
+            votes: 0,
             gameplayHash: gameplayHash,
-            verified: false,
-            globalRank: 0,
-            weeklyRank: 0,
-            monthlyRank: 0
+            timestamp: block.timestamp
         });
         
         bytes32 entryHash = _hashEntry(entry);
@@ -235,19 +224,18 @@ contract DecentralizedLeaderboard is
         uint256 rank = _findGlobalRank(entry.score);
         _insertGlobalEntry(rank, entry);
         playerGlobalRank[player] = rank;
-        entry.globalRank = rank;
         
         // Update weekly leaderboard
         uint256 week = _getCurrentWeek();
         uint256 weeklyRank = _findWeeklyRank(week, entry.score);
         weeklyLeaderboard[week][weeklyRank] = entry;
-        entry.weeklyRank = weeklyRank;
+        playerWeeklyRank[player][week] = weeklyRank;
         
         // Update monthly leaderboard
         uint256 month = _getCurrentMonth();
         uint256 monthlyRank = _findMonthlyRank(month, entry.score);
         monthlyLeaderboard[month][monthlyRank] = entry;
-        entry.monthlyRank = monthlyRank;
+        playerMonthlyRank[player][month] = monthlyRank;
         
         // Update season data
         SeasonData storage season = seasons[currentSeason];
@@ -405,31 +393,27 @@ contract DecentralizedLeaderboard is
     function getLeaderboardEntry(uint256 rank) external view returns (
         address player,
         uint256 score,
+        uint256 level,
         uint256 completionTime,
         uint256 puzzlesSolved,
         uint256 secretsFound,
         uint256 deaths,
-        uint256 timestamp,
+        uint256 votes,
         bytes32 gameplayHash,
-        bool verified,
-        uint256 globalRank,
-        uint256 weeklyRank,
-        uint256 monthlyRank
+        uint256 timestamp
     ) {
         LeaderboardEntry memory entry = globalLeaderboard[rank];
         return (
             entry.player,
             entry.score,
+            entry.level,
             entry.completionTime,
             entry.puzzlesSolved,
             entry.secretsFound,
             entry.deaths,
-            entry.timestamp,
+            entry.votes,
             entry.gameplayHash,
-            entry.verified,
-            entry.globalRank,
-            entry.weeklyRank,
-            entry.monthlyRank
+            entry.timestamp
         );
     }
 
@@ -443,4 +427,113 @@ contract DecentralizedLeaderboard is
     }
 
     function _authorizeUpgrade(address newImplementation) internal override onlyRole(UPGRADER_ROLE) {}
+    
+    // ========== INTERFACE IMPLEMENTATIONS ==========
+    
+    /**
+     * @dev Submit a score to the leaderboard
+     */
+    function submitScore(
+        uint256 level,
+        uint256 score,
+        uint256 completionTime,
+        bytes32 gameplayHash
+    ) external whenNotPaused {
+        LeaderboardEntry memory entry = LeaderboardEntry({
+            player: msg.sender,
+            score: score,
+            level: level,
+            completionTime: completionTime,
+            puzzlesSolved: 0,
+            secretsFound: 0,
+            deaths: 0,
+            votes: 0,
+            gameplayHash: gameplayHash,
+            timestamp: block.timestamp
+        });
+        
+        // Store entry
+        uint256 entryId = totalEntries++;
+        leaderboard[entryId] = entry;
+        playerLatestEntry[msg.sender] = entryId;
+        
+        emit ScoreSubmitted(entryId, msg.sender, score, completionTime, gameplayHash);
+    }
+    
+    /**
+     * @dev Vote for a leaderboard entry
+     */
+    function voteForEntry(uint256 entryId, uint256 votingPower) external whenNotPaused {
+        require(entryId < totalEntries, "Invalid entry ID");
+        require(votingPower > 0, "Voting power must be greater than 0");
+        
+        LeaderboardEntry storage entry = leaderboard[entryId];
+        entry.votes += votingPower;
+        
+        emit VoteCast(entryId, msg.sender, votingPower);
+    }
+    
+    /**
+     * @dev Get top players
+     */
+    function getTopPlayers(uint256 count) external view returns (LeaderboardEntry[] memory) {
+        require(count > 0 && count <= 100, "Invalid count");
+        
+        LeaderboardEntry[] memory topPlayers = new LeaderboardEntry[](count);
+        uint256 actualCount = count > totalEntries ? totalEntries : count;
+        
+        for (uint256 i = 0; i < actualCount; i++) {
+            topPlayers[i] = leaderboard[i];
+        }
+        
+        return topPlayers;
+    }
+    
+    /**
+     * @dev Get player's best score
+     */
+    function getPlayerBestScore(address player) external view returns (uint256) {
+        PlayerStats memory stats = playerStats[player];
+        // Return totalScore divided by totalGames for best score approximation
+        if (stats.totalGames == 0) return 0;
+        return stats.totalScore / stats.totalGames;
+    }
+    
+    /**
+     * @dev Get total votes for an entry
+     */
+    function getTotalVotes(uint256 entryId) external view returns (uint256) {
+        require(entryId < totalEntries, "Invalid entry ID");
+        return leaderboard[entryId].votes;
+    }
+    
+    /**
+     * @dev Start a new season
+     */
+    function startNewSeason() external onlyRole(UPDATER_ROLE) {
+        currentSeason++;
+        _startNewSeason();
+    }
+    
+    /**
+     * @dev Distribute prizes to winners
+     */
+    function distributePrizes(address[] memory winners, uint256[] memory amounts) external onlyRole(UPDATER_ROLE) {
+        require(winners.length == amounts.length, "Arrays must have same length");
+        
+        for (uint256 i = 0; i < winners.length; i++) {
+            // This would integrate with Treasury for actual prize distribution
+            emit PrizeDistributed(winners[i], amounts[i]);
+        }
+    }
+    
+    // Storage for new data
+    mapping(uint256 => LeaderboardEntry) public leaderboard;
+    mapping(address => uint256) public playerLatestEntry;
+    uint256 public totalEntries;
+    
+    // Events for new functions
+    event ScoreSubmitted(uint256 indexed entryId, address indexed player, uint256 score, uint256 completionTime, bytes32 gameplayHash);
+    event VoteCast(uint256 indexed entryId, address indexed voter, uint256 votingPower);
+    event PrizeDistributed(address indexed winner, uint256 amount);
 }

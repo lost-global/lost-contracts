@@ -8,6 +8,7 @@ import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
+import "../interfaces/ILOSTToken.sol";
 
 /**
  * @title LOSTToken
@@ -20,6 +21,7 @@ import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol
  * - Anti-cheat verification before minting
  */
 contract LOSTToken is 
+    ILOSTToken,
     Initializable,
     ERC20Upgradeable,
     ERC20BurnableUpgradeable,
@@ -446,6 +448,96 @@ contract LOSTToken is
         address to,
         uint256 value
     ) internal override whenNotPaused {
+        // Update snapshot balances if needed
+        if (snapshotId > 0) {
+            uint256 currentSnapshot = snapshotId;
+            
+            if (from != address(0) && !accountSnapshotted[currentSnapshot][from]) {
+                balanceSnapshots[currentSnapshot][from] = balanceOf(from);
+                accountSnapshotted[currentSnapshot][from] = true;
+            }
+            
+            if (to != address(0) && !accountSnapshotted[currentSnapshot][to]) {
+                balanceSnapshots[currentSnapshot][to] = balanceOf(to);
+                accountSnapshotted[currentSnapshot][to] = true;
+            }
+        }
+        
         super._update(from, to, value);
+    }
+    
+    // ========== INTERFACE IMPLEMENTATIONS ==========
+    
+    // Additional storage for snapshots
+    uint256 public snapshotId;
+    mapping(uint256 => uint256) public snapshotTimestamp;
+    mapping(uint256 => uint256) public totalSupplySnapshots;
+    mapping(uint256 => mapping(address => uint256)) public balanceSnapshots;
+    mapping(uint256 => mapping(address => bool)) public accountSnapshotted;
+    
+    // Event for snapshot creation
+    event SnapshotCreated(uint256 indexed snapshotId, uint256 timestamp);
+    
+    /**
+     * @dev Basic mint function required by ILOSTToken interface
+     */
+    function mint(address to, uint256 amount) external onlyRole(MINTER_ROLE) {
+        require(to != address(0), "Invalid address");
+        require(totalMinted + amount <= MAX_SUPPLY, "Max supply exceeded");
+        
+        _mint(to, amount);
+        totalMinted += amount;
+        
+        emit RewardMinted(to, amount, "DIRECT_MINT", bytes32(0));
+    }
+    
+    /**
+     * @dev Create a snapshot of current token balances
+     */
+    function snapshot() external onlyRole(DEFAULT_ADMIN_ROLE) returns (uint256) {
+        // Increment and return snapshot id
+        snapshotId++;
+        snapshotTimestamp[snapshotId] = block.timestamp;
+        
+        // Store current total supply at this snapshot
+        totalSupplySnapshots[snapshotId] = totalSupply();
+        
+        emit SnapshotCreated(snapshotId, block.timestamp);
+        return snapshotId;
+    }
+    
+    /**
+     * @dev Get the current snapshot ID
+     */
+    function getCurrentSnapshotId() external view returns (uint256) {
+        return snapshotId;
+    }
+    
+    /**
+     * @dev Get balance at a specific snapshot
+     */
+    function balanceOfAt(address account, uint256 _snapshotId) external view returns (uint256) {
+        require(_snapshotId > 0 && _snapshotId <= snapshotId, "Invalid snapshot");
+        
+        // Check if we have a recorded balance for this snapshot
+        uint256 recordedBalance = balanceSnapshots[_snapshotId][account];
+        if (recordedBalance > 0 || accountSnapshotted[_snapshotId][account]) {
+            return recordedBalance;
+        }
+        
+        // If no snapshot record exists, return current balance if account existed at snapshot time
+        if (snapshotTimestamp[_snapshotId] <= block.timestamp) {
+            return balanceOf(account);
+        }
+        
+        return 0;
+    }
+    
+    /**
+     * @dev Get total supply at a specific snapshot
+     */
+    function totalSupplyAt(uint256 _snapshotId) external view returns (uint256) {
+        require(_snapshotId > 0 && _snapshotId <= snapshotId, "Invalid snapshot");
+        return totalSupplySnapshots[_snapshotId];
     }
 }
