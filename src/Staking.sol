@@ -8,6 +8,7 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "./interfaces/IStaking.sol";
 
 /**
  * @title Staking
@@ -25,7 +26,8 @@ contract Staking is
     AccessControlUpgradeable,
     PausableUpgradeable,
     UUPSUpgradeable,
-    ReentrancyGuardUpgradeable
+    ReentrancyGuardUpgradeable,
+    IStaking
 {
     using SafeERC20 for IERC20;
 
@@ -231,7 +233,7 @@ contract Staking is
         });
     }
 
-    function stake(uint256 amount, StakingTier tier) external whenNotPaused nonReentrant {
+    function _stakeInternal(uint256 amount, StakingTier tier) internal {
         require(amount > 0, "Invalid amount");
         TierConfig memory config = tierConfigs[tier];
         require(amount >= config.minStakeAmount, "Below minimum stake");
@@ -544,6 +546,25 @@ contract Staking is
 
     function pause() external onlyRole(DEFAULT_ADMIN_ROLE) {
         _pause();
+    }
+    
+    // Interface implementations for IStaking
+    function getVotingPower(address user) external view returns (uint256) {
+        return userStaking[user].totalVotingPower;
+    }
+    
+    function getTotalVotingPower() external view returns (uint256) {
+        return totalVotingPower;
+    }
+    
+    // Wrapper function to match interface signature
+    function stake(uint256 amount, uint256 tier) external whenNotPaused nonReentrant {
+        _stakeInternal(amount, StakingTier(tier));
+    }
+    
+    // Overloaded function with StakingTier enum
+    function stake(uint256 amount, StakingTier tier) external whenNotPaused nonReentrant {
+        _stakeInternal(amount, tier);
     }
 
     function unpause() external onlyRole(DEFAULT_ADMIN_ROLE) {

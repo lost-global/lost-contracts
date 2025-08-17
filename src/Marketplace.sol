@@ -193,23 +193,23 @@ contract Marketplace is
         emit ListingSold(listingId, msg.sender, listing.price);
     }
 
-    function rentNFT(uint256 listingId, uint256 duration) external payable whenNotPaused nonReentrant {
+    function rentNFT(uint256 listingId, uint256 rentalDays) external payable whenNotPaused nonReentrant {
         Listing storage listing = listings[listingId];
         RentalTerms storage rental = rentalTerms[listingId];
         
         require(listing.status == ListingStatus.ACTIVE, "Listing not active");
         require(listing.listingType == ListingType.RENT, "Not a rental listing");
         require(currentRenter[listing.tokenId] == address(0), "Already rented");
-        require(duration >= rental.minDuration && duration <= rental.maxDuration, "Invalid rental duration");
+        require(rentalDays >= rental.minDuration && rentalDays <= rental.maxDuration, "Invalid rental duration");
         
-        uint256 rentalDays = duration / 1 days;
+        uint256 rentalDuration = rentalDays * 1 days;
         uint256 totalCost = rental.dailyRate * rentalDays;
         uint256 totalPayment = totalCost + rental.collateral;
         
         require(msg.value >= totalPayment, "Insufficient payment");
         
         currentRenter[listing.tokenId] = msg.sender;
-        rentalEndTime[listing.tokenId] = block.timestamp + duration;
+        rentalEndTime[listing.tokenId] = block.timestamp + rentalDuration;
         userRentals[msg.sender].push(listing.tokenId);
         
         // Distribute rental payment (keep collateral in contract)
@@ -225,7 +225,7 @@ contract Marketplace is
             require(refundSuccess, "Refund failed");
         }
         
-        emit RentalStarted(listing.tokenId, msg.sender, duration, totalCost);
+        emit RentalStarted(listing.tokenId, msg.sender, rentalDuration, totalCost);
     }
 
     function returnRentedNFT(uint256 tokenId) external whenNotPaused nonReentrant {
