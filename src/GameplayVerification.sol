@@ -359,6 +359,36 @@ contract GameplayVerification is
     function isSessionVerified(bytes32 sessionId) external view returns (bool) {
         return gameSessions[sessionId].verified;
     }
+    
+    function verifySession(bytes32 sessionId) external view returns (bool) {
+        return gameSessions[sessionId].verified;
+    }
+    
+    /**
+     * @dev Verify and mark a session as complete without full movement tracking
+     * For simplified verification when full physics validation isn't needed
+     */
+    function quickVerifySession(
+        address player,
+        bytes32 sessionHash,
+        uint256 completionTime
+    ) external onlyRole(VERIFIER_ROLE) returns (bool) {
+        GameSession storage session = gameSessions[sessionHash];
+        
+        // If session doesn't exist, create it
+        if (session.startTime == 0) {
+            session.player = player;
+            session.startTime = block.timestamp - completionTime;
+            session.endTime = block.timestamp;
+            session.sessionHash = sessionHash;
+            session.completed = true;
+            session.verified = true;
+            
+            emit SessionCompleted(sessionHash, player, completionTime, true);
+        }
+        
+        return true;
+    }
 
     function unbanPlayer(address player) external onlyRole(DEFAULT_ADMIN_ROLE) {
         bannedPlayers[player] = false;

@@ -68,6 +68,7 @@ contract LOSTToken is
     // Puzzle completion tracking
     mapping(address => uint256) public playerPuzzlesCompleted;
     mapping(address => mapping(bytes32 => bool)) public puzzleCompleted;
+    mapping(address => uint256) public playerCurrentLevel;
     
     // Events
     event RewardMinted(
@@ -164,6 +165,13 @@ contract LOSTToken is
         if (!puzzleCompleted[player][puzzleId]) {
             puzzleCompleted[player][puzzleId] = true;
             playerPuzzlesCompleted[player]++;
+            
+            // Update current level based on puzzles completed
+            if (playerPuzzlesCompleted[player] >= 4) {
+                playerCurrentLevel[player] = 2; // Completed all 4 puzzles, move to level 2
+            } else {
+                playerCurrentLevel[player] = 1; // Still on level 1
+            }
         }
         
         uint256 baseReward = PUZZLE_COMPLETION_REWARD;
@@ -386,6 +394,16 @@ contract LOSTToken is
      */
     function isPuzzleCompleted(address player, bytes32 puzzleId) external view returns (bool) {
         return puzzleCompleted[player][puzzleId];
+    }
+    
+    /**
+     * @dev Get player progress (current level)
+     * @param player The player address
+     * @return currentLevel The player's current level
+     */
+    function getPlayerProgress(address player) external view returns (uint256) {
+        uint256 level = playerCurrentLevel[player];
+        return level > 0 ? level : 1; // Default to level 1 if not set
     }
 
     /**
