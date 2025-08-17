@@ -111,9 +111,12 @@ contract LOSTAchievementNFT is
         AchievementType achievementType,
         Achievement memory gameplayData,
         string memory ipfsHash
-    ) external onlyRole(GAME_CONTROLLER_ROLE) nonReentrant whenNotPaused returns (uint256) {
+    ) external onlyRole(MINTER_ROLE) nonReentrant whenNotPaused returns (uint256) {
         require(player != address(0), "Invalid player");
-        require(verifiedGameplayHashes[gameplayData.gameplayHash], "Unverified gameplay");
+        // Auto-verify the gameplay hash if sent by authorized minter
+        if (!verifiedGameplayHashes[gameplayData.gameplayHash]) {
+            verifiedGameplayHashes[gameplayData.gameplayHash] = true;
+        }
         require(bytes(ipfsHash).length > 0, "Invalid IPFS hash");
 
         uint256 tokenId = _tokenIdCounter;

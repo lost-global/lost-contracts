@@ -370,6 +370,69 @@ contract DecentralizedLeaderboard is
         emit SeasonStarted(currentSeason, season.startTime, season.endTime);
     }
 
+    // View functions for API integration
+    function getPlayerRank(address player) external view returns (uint256) {
+        return playerGlobalRank[player];
+    }
+    
+    function getTotalPlayers() external view returns (uint256) {
+        return totalPlayers;
+    }
+    
+    function getPlayerStats(address player) external view returns (
+        uint256 totalGames,
+        uint256 totalScore,
+        uint256 bestTime,
+        uint256 averageTime,
+        uint256 winStreak,
+        uint256 currentStreak,
+        uint256 skillRating,
+        uint256 lastPlayedTimestamp
+    ) {
+        PlayerStats memory stats = playerStats[player];
+        return (
+            stats.totalGames,
+            stats.totalScore,
+            stats.bestTime,
+            stats.averageTime,
+            stats.winStreak,
+            stats.currentStreak,
+            stats.skillRating,
+            stats.lastPlayedTimestamp
+        );
+    }
+    
+    function getLeaderboardEntry(uint256 rank) external view returns (
+        address player,
+        uint256 score,
+        uint256 completionTime,
+        uint256 puzzlesSolved,
+        uint256 secretsFound,
+        uint256 deaths,
+        uint256 timestamp,
+        bytes32 gameplayHash,
+        bool verified,
+        uint256 globalRank,
+        uint256 weeklyRank,
+        uint256 monthlyRank
+    ) {
+        LeaderboardEntry memory entry = globalLeaderboard[rank];
+        return (
+            entry.player,
+            entry.score,
+            entry.completionTime,
+            entry.puzzlesSolved,
+            entry.secretsFound,
+            entry.deaths,
+            entry.timestamp,
+            entry.gameplayHash,
+            entry.verified,
+            entry.globalRank,
+            entry.weeklyRank,
+            entry.monthlyRank
+        );
+    }
+
     // Admin functions
     function pause() external onlyRole(DEFAULT_ADMIN_ROLE) {
         _pause();
