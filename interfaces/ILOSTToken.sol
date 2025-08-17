@@ -1,12 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-
-interface ILOSTToken is IERC20 {
+interface ILOSTToken {
     function mint(address to, uint256 amount) external;
-    function burn(uint256 amount) external;
-    function burnFrom(address account, uint256 amount) external;
     function pause() external;
     function unpause() external;
     function snapshot() external returns (uint256);

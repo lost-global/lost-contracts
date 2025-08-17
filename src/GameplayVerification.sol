@@ -9,6 +9,7 @@ import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
+import "../interfaces/IGameplayVerification.sol";
 
 /**
  * @title GameplayVerification
@@ -22,6 +23,7 @@ import "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
  * - Zero-knowledge proofs for anonymous leaderboards
  */
 contract GameplayVerification is
+    IGameplayVerification,
     Initializable,
     AccessControlUpgradeable,
     PausableUpgradeable,
@@ -80,6 +82,10 @@ contract GameplayVerification is
     // Checkpoint verification
     mapping(bytes32 => mapping(uint256 => bool)) public checkpointVerified;
     mapping(uint256 => bytes32) public checkpointHashes;
+    
+    // Gameplay verification
+    mapping(bytes32 => bool) public verifiedGameplayHashes;
+    mapping(bytes32 => mapping(address => bytes32)) public playerGameplayHashes;
     
     // Statistical analysis
     mapping(address => uint256) public averageCompletionTime;
@@ -418,4 +424,108 @@ contract GameplayVerification is
     }
 
     function _authorizeUpgrade(address newImplementation) internal override onlyRole(UPGRADER_ROLE) {}
+    
+    // ========== INTERFACE IMPLEMENTATIONS ==========
+    
+    /**
+     * @dev Verify gameplay data matches expectations
+     */
+    function verifyGameplay(
+        address player,
+        uint256 level,
+        uint256 score,
+        uint256 completionTime,
+        bytes32 gameplayHash
+    ) external returns (bool) {
+        require(!bannedPlayers[player], "Player is banned");
+        require(gameplayHash != bytes32(0), "Invalid gameplay hash");
+        
+        // Create session hash from gameplay data
+        bytes32 sessionHash = keccak256(abi.encodePacked(player, level, score, completionTime, gameplayHash));
+        
+        // Mark gameplay hash as verified
+        verifiedGameplayHashes[gameplayHash] = true;
+        
+        // Create or update session
+        GameSession storage session = gameSessions[sessionHash];
+        if (session.player == address(0)) {
+            session.player = player;
+            session.sessionHash = sessionHash;
+            session.endTime = block.timestamp;
+            session.startTime = block.timestamp - completionTime;
+            session.verified = true;
+            session.completed = true;
+            playerSessions[player].push(sessionHash);
+        }
+        
+        // Store gameplay hash
+        playerGameplayHashes[sessionHash][player] = gameplayHash;
+        
+        emit SessionCompleted(sessionHash, player, completionTime, true);
+        
+        return true;
+    }
+    
+    /**
+     * @dev Submit a new game session for verification
+     */
+    function submitGameSession(
+        address player,
+        bytes32 sessionHash,
+        uint256 startTime,
+        uint256 endTime,
+        bytes calldata signature
+    ) external {
+        require(!bannedPlayers[player], "Player is banned");
+        require(endTime > startTime, "Invalid time range");
+        require(player != address(0), "Invalid player");
+        
+        // Verify signature
+        bytes32 messageHash = keccak256(abi.encodePacked(player, sessionHash, startTime, endTime));
+        address signer = _recoverSigner(messageHash, signature);
+        require(signer == player, "Invalid signature");
+        
+        GameSession storage session = gameSessions[sessionHash];
+        require(session.player == address(0), "Session already exists");
+        
+        session.player = player;
+        session.sessionHash = sessionHash;
+        session.startTime = startTime;
+        session.endTime = endTime;
+        session.verified = false;
+        session.completed = false;
+        
+        playerSessions[player].push(sessionHash);
+        
+        emit SessionSubmitted(sessionHash, player, endTime - startTime);
+    }
+    
+    /**
+     * @dev Get player statistics
+     */
+    function getPlayerStats(address player) external view returns (
+        uint256 totalScore,
+        uint256 gamesPlayed,
+        uint256 achievements,
+        uint256 lastPlayTime
+    ) {
+        uint256 totalSessions = playerSessions[player].length;
+        uint256 playerScore = totalCompletions[player] * 1000; // Calculate score based on completions
+        uint256 achievementCount = totalCompletions[player]; // Use completions as achievements
+        uint256 lastTime = playerLastSession[player];
+        
+        return (
+            playerScore,
+            totalSessions,
+            achievementCount,
+            lastTime
+        );
+    }
+    
+    // Additional storage for interface compliance
+    mapping(address => uint256) public playerLastSession;
+    
+    // Additional events
+    event SessionSubmitted(bytes32 indexed sessionHash, address indexed player, uint256 completionTime);
+    event SessionVerified(bytes32 indexed sessionHash, address indexed player, uint256 completionTime, uint256 score);
 }

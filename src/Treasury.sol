@@ -8,6 +8,7 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "../interfaces/ITreasury.sol";
 
 /**
  * @title Treasury
@@ -21,6 +22,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
  * - Emergency functions
  */
 contract Treasury is
+    ITreasury,
     Initializable,
     AccessControlUpgradeable,
     PausableUpgradeable,
@@ -218,14 +220,16 @@ contract Treasury is
         emit FundsDistributed(recipient, amount, purpose);
     }
 
-    function createFundingProposal(
-        address recipient,
+    function createProposal(
+        string memory title,
+        string memory description,
+        uint256 proposalType,
         uint256 amount,
-        string memory purpose
+        address recipient
     ) external onlyRole(TREASURER_ROLE) returns (uint256) {
         require(recipient != address(0), "Invalid recipient");
         require(amount >= MINIMUM_PROPOSAL_AMOUNT, "Amount below minimum");
-        require(bytes(purpose).length > 0, "Purpose required");
+        require(bytes(description).length > 0, "Description required");
         
         uint256 proposalId = nextProposalId++;
         
@@ -233,7 +237,7 @@ contract Treasury is
             proposalId: proposalId,
             recipient: recipient,
             amount: amount,
-            purpose: purpose,
+            purpose: description,
             votesFor: 0,
             votesAgainst: 0,
             endTime: block.timestamp + PROPOSAL_DURATION,
@@ -386,4 +390,51 @@ contract Treasury is
 
     // Liquidity pool address storage
     address public liquidityPoolAddress;
+
+    // ========== INTERFACE IMPLEMENTATIONS ==========
+    
+    
+    /**
+     * @dev Cast vote on a proposal
+     */
+    function castVote(uint256 proposalId, bool support) external {
+        // This would integrate with governance contract
+        emit VoteCast(proposalId, msg.sender, support);
+    }
+    
+    
+    /**
+     * @dev Deposit tokens to treasury
+     */
+    function depositToTreasury(uint256 amount) external nonReentrant whenNotPaused {
+        require(amount > 0, "Amount must be greater than 0");
+        IERC20(lostTokenAddress).safeTransferFrom(msg.sender, address(this), amount);
+        totalRevenue += amount;
+        emit FundsReceived("deposit", amount, msg.sender);
+    }
+    
+    /**
+     * @dev Get treasury balance of LOST tokens
+     */
+    function getTreasuryBalance() external view returns (uint256) {
+        return IERC20(lostTokenAddress).balanceOf(address(this));
+    }
+    
+    /**
+     * @dev Get user's share in treasury (for stakers/governance participants)
+     */
+    function getUserShare(address user) external view returns (uint256) {
+        // This would calculate based on staking/governance participation
+        // For now return 0 as placeholder
+        return 0;
+    }
+    
+    // Events for new functions
+    event ProposalCreated(uint256 indexed proposalId, string title, uint256 amount, address target);
+    event VoteCast(uint256 indexed proposalId, address indexed voter, bool support);
+    event ProposalExecuted(uint256 indexed proposalId);
+    event FundsReceived(string source, uint256 amount, address from);
+    
+    // Counter for proposals
+    uint256 private proposalCounter;
 }

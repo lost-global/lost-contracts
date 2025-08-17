@@ -7,6 +7,9 @@ interface IDecentralizedLeaderboard {
         uint256 score;
         uint256 level;
         uint256 completionTime;
+        uint256 puzzlesSolved;
+        uint256 secretsFound;
+        uint256 deaths;
         uint256 votes;
         bytes32 gameplayHash;
         uint256 timestamp;
